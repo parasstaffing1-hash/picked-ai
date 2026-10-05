@@ -260,11 +260,16 @@ export async function executeGoogleAIOverviewCheck(
       const endpoint = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(
         question
       )}&api_key=${serpApiKey}`;
-      const res = await withRetry(async () => {
-        const r = await fetch(endpoint);
-        if (!r.ok) throw new Error(`SerpApi responded with HTTP ${r.status}`);
-        return await r.json();
-      });
+      const res = await withRetry(
+        async () => {
+          const r = await fetch(endpoint);
+          if (!r.ok) throw new Error(`SerpApi responded with HTTP ${r.status}`);
+          return await r.json();
+        },
+        1,
+        300,
+        6000
+      );
 
       const aiOverview = res.ai_overview;
       const citations: Array<{ title?: string; url: string; domain: string }> = [];
