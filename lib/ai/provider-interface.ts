@@ -1,10 +1,16 @@
 import { extractCitationsFromText } from './providers';
-import { executeOpenAICheck, executeGeminiCheck, executeGoogleSearchCheck, EngineObservation } from './engines';
+import {
+  executeOpenAICheck,
+  executeGeminiCheck,
+  executeGoogleAIOverviewCheck,
+  executeGoogleSearchCheck,
+  EngineObservation,
+} from './engines';
 
 export interface ProviderAnswerResult extends EngineObservation {}
 
 export interface AIProvider {
-  getProviderName(): 'openai' | 'gemini' | 'google_search';
+  getProviderName(): 'openai' | 'gemini' | 'google_ai_overview' | 'google_search';
   getModelName(): string;
   generateAnswer(
     question: string,
@@ -40,7 +46,7 @@ export class GeminiProvider implements AIProvider {
   }
 
   getModelName(): string {
-    return process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+    return process.env.GEMINI_MODEL || 'gemini-3.8-flash';
   }
 
   async generateAnswer(
@@ -48,6 +54,31 @@ export class GeminiProvider implements AIProvider {
     context?: { businessName?: string }
   ): Promise<ProviderAnswerResult> {
     return await executeGeminiCheck(question, context?.businessName || '');
+  }
+
+  extractSources(text: string): Array<{ title?: string; url: string; domain: string }> {
+    return extractCitationsFromText(text);
+  }
+}
+
+export class GoogleAIOverviewProvider implements AIProvider {
+  getProviderName(): 'google_ai_overview' {
+    return 'google_ai_overview';
+  }
+
+  getModelName(): string {
+    return 'Google AI Overviews';
+  }
+
+  async generateAnswer(
+    question: string,
+    context?: { businessName?: string; targetDomain?: string }
+  ): Promise<ProviderAnswerResult> {
+    return await executeGoogleAIOverviewCheck(
+      question,
+      context?.targetDomain || '',
+      context?.businessName || ''
+    );
   }
 
   extractSources(text: string): Array<{ title?: string; url: string; domain: string }> {
@@ -81,8 +112,13 @@ export class GoogleSearchProvider implements AIProvider {
 }
 
 // Registry / Factory
-export const defaultProviders: Record<'openai' | 'gemini' | 'google_search', AIProvider> = {
+export const defaultProviders: Record<
+  'openai' | 'gemini' | 'google_ai_overview' | 'google_search',
+  AIProvider
+> = {
   openai: new OpenAIProvider(),
   gemini: new GeminiProvider(),
+  google_ai_overview: new GoogleAIOverviewProvider(),
   google_search: new GoogleSearchProvider(),
 };
+

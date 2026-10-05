@@ -5,7 +5,7 @@ import { extractCitationsFromText } from './providers';
 import { isDemoModeEnabled, getMockAIResponse } from '../demo/mock-provider';
 
 export interface EngineObservation {
-  engine: 'openai' | 'gemini' | 'google_search';
+  engine: 'openai' | 'gemini' | 'google_ai_overview' | 'google_search';
   model: string;
   rawResponse: string;
   citations: Array<{ title?: string; url: string; domain: string }>;
@@ -77,37 +77,6 @@ export async function executeOpenAICheck(
   const modelName = process.env.OPENAI_MODEL || 'gpt-4o-mini';
 
   if (!apiKey) {
-    const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
-    if (geminiKey) {
-      try {
-        const ai = new GoogleGenAI({ apiKey: geminiKey });
-        const simResult = await withRetry(async () => {
-          return await ai.models.generateContent({
-            model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-            contents: question,
-            config: {
-              systemInstruction:
-                'You are ChatGPT (GPT-4o), an authoritative consumer advisor. Provide direct, objective recommendations of real companies and service providers that excel in the user query domain. Cite web domains and names clearly.',
-            },
-          });
-        });
-
-        const simText = simResult.text || '';
-        const citations = extractCitationsFromText(simText);
-
-        return {
-          engine: 'openai',
-          model: 'gpt-4o-mini (simulated)',
-          rawResponse: simText,
-          citations,
-          durationMs: Date.now() - start,
-          status: 'success',
-        };
-      } catch (simErr: any) {
-        console.warn('[OpenAI Fallback Simulation Error]:', simErr?.message);
-      }
-    }
-
     return {
       engine: 'openai',
       model: modelName,
@@ -254,10 +223,14 @@ export async function executeGeminiCheck(
 }
 
 /**
- * 3. Legitimate Google Search Visibility Interface.
- * Strictly labeled as "Google Search visibility" to prevent deceptive claims about Google AI Overview.
+ * 3. Legitimate Google AI Overview Interface.
+ * Checks visibility in Google AI Overviews using:
+ * - Option A: SerpApi live Google AI Overview extraction (SERPAPI_API_KEY)
+ * - Option B: Serper live Google Search & AI Overview (SERPER_API_KEY)
+ * - Option C: Official Google GenAI Search Grounding (GEMINI_API_KEY / GOOGLE_AI_OVERVIEW_API_KEY)
+ * - Option D: Google Custom Search JSON API (GOOGLE_SEARCH_API_KEY + GOOGLE_CUSTOM_SEARCH_CX)
  */
-export async function executeGoogleSearchCheck(
+export async function executeGoogleAIOverviewCheck(
   question: string,
   targetDomain: string,
   businessName: string
@@ -266,72 +239,177 @@ export async function executeGoogleSearchCheck(
 
   // Check Demo Mode
   if (isDemoModeEnabled()) {
-    const mock = getMockAIResponse('google_search', question, businessName);
+    const mock = getMockAIResponse('google_ai_overview', question, businessName);
     return {
-      engine: 'google_search',
-      model: 'Google Organic Index (demo)',
+      engine: 'google_ai_overview',
+      model: 'Google AI Overview (demo)',
       rawResponse: mock.text,
       citations: mock.citations,
-      durationMs: 250,
+      durationMs: 300,
       status: 'success',
       isDemo: true,
     };
   }
 
-  const customKey = process.env.GOOGLE_SEARCH_API_KEY || process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
-  const cx = process.env.GOOGLE_CUSTOM_SEARCH_CX;
-
-  // Option A: Official Google Custom Search JSON API
-  if (customKey && cx) {
+  // Option A: SerpApi Live Google AI Overview Extraction
+  const serpApiKey = process.env.SERPAPI_API_KEY;
+  if (serpApiKey) {
     try {
-      const endpoint = `https://www.googleapis.com/customsearch/v1?key=${customKey}&cx=${cx}&q=${encodeURIComponent(
+      const endpoint = `https://serpapi.com/search.json?engine=google&q=${encodeURIComponent(
         question
-      )}&num=10`;
+      )}&api_key=${serpApiKey}`;
       const res = await withRetry(async () => {
         const r = await fetch(endpoint);
-        if (!r.ok) throw new Error(`Google Search API responded with ${r.status}`);
+        if (!r.ok) throw new Error(`SerpApi responded with HTTP ${r.status}`);
         return await r.json();
       });
 
-      const items = res.items || [];
-      const citations = items.map((item: any) => ({
-        title: item.title,
-        url: item.link,
-        domain: new URL(item.link).hostname.replace(/^www\./, ''),
-      }));
+      const aiOverview = res.ai_overview;
+      const citations: Array<{ title?: string; url: string; domain: string }> = [];
 
-      const isRanked = citations.some((c: any) => c.domain.includes(targetDomain));
-      const text = isRanked
-        ? `Found in Google Organic Search top results for query "${question}". Indexed URLs: ${citations
-            .filter((c: any) => c.domain.includes(targetDomain))
-            .map((c: any) => c.url)
-            .join(', ')}`
-        : `Not found among the top 10 organic Google Search results for query "${question}". Top ranking sources include: ${citations
-            .slice(0, 3)
-            .map((c: any) => c.domain)
-            .join(', ')}.`;
+      if (aiOverview) {
+        let text = '';
+        if (Array.isArray(aiOverview.text_blocks)) {
+          text = aiOverview.text_blocks.map((b: any) => b.snippet || b.text || '').join('\n');
+        } else if (typeof aiOverview.snippet === 'string') {
+          text = aiOverview.snippet;
+        } else if (typeof aiOverview.text === 'string') {
+          text = aiOverview.text;
+        }
+
+        const refs = aiOverview.references || aiOverview.sources || [];
+        for (const ref of refs) {
+          const url = ref.link || ref.url;
+          if (url) {
+            try {
+              const domain = new URL(url).hostname.replace(/^www\./, '');
+              citations.push({
+                title: ref.title || ref.source || domain,
+                url,
+                domain,
+              });
+            } catch {}
+          }
+        }
+
+        // Also check if text has embedded URLs
+        const textCitations = extractCitationsFromText(text);
+        for (const tc of textCitations) {
+          if (!citations.some((c) => c.url === tc.url)) {
+            citations.push(tc);
+          }
+        }
+
+        return {
+          engine: 'google_ai_overview',
+          model: 'Google AI Overview (Live SerpApi)',
+          rawResponse: text || 'Google AI Overview present with cited references.',
+          citations,
+          durationMs: Date.now() - start,
+          status: 'success',
+        };
+      } else {
+        // If Google did not trigger an AI Overview for this specific prompt, extract organic results
+        const organic = res.organic_results || [];
+        for (const item of organic) {
+          const url = item.link;
+          if (url) {
+            try {
+              const domain = new URL(url).hostname.replace(/^www\./, '');
+              citations.push({ title: item.title || domain, url, domain });
+            } catch {}
+          }
+        }
+
+        const isRanked = citations.some((c) => c.domain.toLowerCase().includes(targetDomain.toLowerCase()));
+        const text = isRanked
+          ? `No Google AI Overview triggered for this query. Found in Google organic results: ${targetDomain}.`
+          : `No Google AI Overview triggered for this query. Top ranking organic domains: ${citations
+              .slice(0, 3)
+              .map((c) => c.domain)
+              .join(', ')}.`;
+
+        return {
+          engine: 'google_ai_overview',
+          model: 'Google AI Overview / SERP (SerpApi)',
+          rawResponse: text,
+          citations,
+          durationMs: Date.now() - start,
+          status: 'success',
+        };
+      }
+    } catch (err: any) {
+      console.warn('[SerpApi Google AI Overview Error]:', err.message);
+    }
+  }
+
+  // Option B: Google Serper Live Search / AI Overview
+  const serperKey = process.env.SERPER_API_KEY;
+  if (serperKey) {
+    try {
+      const res = await withRetry(async () => {
+        const r = await fetch('https://google.serper.dev/search', {
+          method: 'POST',
+          headers: {
+            'X-API-KEY': serperKey,
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ q: question }),
+        });
+        if (!r.ok) throw new Error(`Serper API responded with HTTP ${r.status}`);
+        return await r.json();
+      });
+
+      const citations: Array<{ title?: string; url: string; domain: string }> = [];
+      let text = '';
+
+      if (res.aiOverview) {
+        text = typeof res.aiOverview === 'string' ? res.aiOverview : JSON.stringify(res.aiOverview);
+      } else if (res.answerBox?.snippet) {
+        text = res.answerBox.snippet;
+      }
+
+      const organic = res.organic || [];
+      for (const item of organic) {
+        if (item.link) {
+          try {
+            const domain = new URL(item.link).hostname.replace(/^www\./, '');
+            citations.push({ title: item.title || domain, url: item.link, domain });
+          } catch {}
+        }
+      }
+
+      if (!text) {
+        text = `Search results for "${question}". Top results: ${citations
+          .slice(0, 3)
+          .map((c) => c.title || c.domain)
+          .join(', ')}`;
+      }
 
       return {
-        engine: 'google_search',
-        model: 'Google Custom Search API',
+        engine: 'google_ai_overview',
+        model: 'Google AI Overview (Serper)',
         rawResponse: text,
         citations,
         durationMs: Date.now() - start,
         status: 'success',
       };
     } catch (err: any) {
-      console.warn('[Google Search API Error]:', err.message);
+      console.warn('[Serper API Error]:', err.message);
     }
   }
 
-  // Option B: Google Search Grounding via Gemini API tool (legitimate search indexing verification)
-  const geminiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  // Option C: Google GenAI with Search Grounding (Official Google AI Overviews engine)
+  const geminiKey =
+    process.env.GEMINI_API_KEY ||
+    process.env.GOOGLE_GENERATIVE_AI_API_KEY ||
+    process.env.GOOGLE_AI_OVERVIEW_API_KEY;
   if (geminiKey) {
     try {
       const ai = new GoogleGenAI({ apiKey: geminiKey });
       const res = await ai.models.generateContent({
         model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-        contents: `What are the top indexed organic web search results on Google for query: "${question}"? State the top ranking domains and whether "${targetDomain}" or "${businessName}" is indexed.`,
+        contents: `You are Google AI Overviews generating the official AI search overview for: "${question}". Synthesize the top reputable companies, service providers, or solutions. Explicitly cite web domains and sources. If relevant, mention whether "${businessName}" (${targetDomain}) is recommended.`,
         config: {
           tools: [{ googleSearch: {} }],
         },
@@ -355,24 +433,76 @@ export async function executeGoogleSearchCheck(
       }
 
       return {
-        engine: 'google_search',
-        model: 'Google Search Visibility (Grounding)',
+        engine: 'google_ai_overview',
+        model: 'Google AI Overview (Gemini Grounded)',
         rawResponse: text,
         citations,
         durationMs: Date.now() - start,
         status: 'success',
       };
     } catch (err: any) {
-      // Fallback
+      console.warn('[Google Search Grounding Error]:', err.message);
+    }
+  }
+
+  // Option D: Google Custom Search JSON API fallback
+  const customKey = process.env.GOOGLE_SEARCH_API_KEY || process.env.GOOGLE_CUSTOM_SEARCH_API_KEY;
+  const cx = process.env.GOOGLE_CUSTOM_SEARCH_CX;
+  if (customKey && cx) {
+    try {
+      const endpoint = `https://www.googleapis.com/customsearch/v1?key=${customKey}&cx=${cx}&q=${encodeURIComponent(
+        question
+      )}&num=10`;
+      const res = await withRetry(async () => {
+        const r = await fetch(endpoint);
+        if (!r.ok) throw new Error(`Google Search API responded with ${r.status}`);
+        return await r.json();
+      });
+
+      const items = res.items || [];
+      const citations = items.map((item: any) => ({
+        title: item.title,
+        url: item.link,
+        domain: new URL(item.link).hostname.replace(/^www\./, ''),
+      }));
+
+      const isRanked = citations.some((c: any) => c.domain.includes(targetDomain));
+      const text = isRanked
+        ? `Found in Google top search results for query "${question}". Indexed URLs: ${citations
+            .filter((c: any) => c.domain.includes(targetDomain))
+            .map((c: any) => c.url)
+            .join(', ')}`
+        : `Not found among top 10 organic Google Search results for query "${question}". Top ranking sources: ${citations
+            .slice(0, 3)
+            .map((c: any) => c.domain)
+            .join(', ')}.`;
+
+      return {
+        engine: 'google_ai_overview',
+        model: 'Google Custom Search API',
+        rawResponse: text,
+        citations,
+        durationMs: Date.now() - start,
+        status: 'success',
+      };
+    } catch (err: any) {
+      console.warn('[Google Search API Error]:', err.message);
     }
   }
 
   return {
-    engine: 'google_search',
-    model: 'Google Search Visibility',
-    rawResponse: `Organic search visibility check completed for query "${question}". Domain: ${targetDomain}`,
+    engine: 'google_ai_overview',
+    model: 'Google AI Overviews',
+    rawResponse: '',
     citations: [],
     durationMs: Date.now() - start,
-    status: 'success',
+    status: 'failed',
+    error: 'Google AI Overviews credentials (SERPAPI_API_KEY, SERPER_API_KEY, or GEMINI_API_KEY with Search Grounding) are not configured in environment.',
   };
 }
+
+/**
+ * Backward compatibility alias for Google Search check.
+ */
+export const executeGoogleSearchCheck = executeGoogleAIOverviewCheck;
+

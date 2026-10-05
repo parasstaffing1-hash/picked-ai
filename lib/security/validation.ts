@@ -97,10 +97,45 @@ export function validateAndNormalizeUrl(input: string): ValidationResult {
 
   // Clean and normalize
   parsed.hash = ''; // strip fragments
+  const cleanPath = parsed.pathname === '/' ? '' : parsed.pathname.replace(/\/+$/, '');
+  const normalizedUrl = `${parsed.origin}${cleanPath}`;
+
   return {
     valid: true,
-    normalizedUrl: parsed.origin,
+    normalizedUrl,
   };
+}
+
+/**
+ * Checks whether an IP address belongs to private, loopback, or cloud metadata ranges.
+ */
+export function isPrivateIp(ip: string): boolean {
+  if (!ip) return true;
+  if (ip === '127.0.0.1' || ip === '0.0.0.0' || ip === '::1' || ip === 'localhost') return true;
+  for (const prefix of BLOCKED_IP_PREFIXES) {
+    if (ip.startsWith(prefix)) return true;
+  }
+  return false;
+}
+
+/**
+ * Validates target host resolution asynchronously to prevent DNS rebinding SSRF attacks.
+ */
+export async function validateHostResolution(hostname: string): Promise<boolean> {
+  try {
+    const dns = await import('node:dns/promises');
+    const result = await dns.lookup(hostname, { all: true });
+    if (!result || result.length === 0) return false;
+    for (const entry of result) {
+      if (isPrivateIp(entry.address)) {
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    // If DNS resolution fails, reject to be safe
+    return false;
+  }
 }
 
 /**

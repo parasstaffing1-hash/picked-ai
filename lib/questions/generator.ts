@@ -113,8 +113,18 @@ No backticks, no markdown, raw JSON only.`;
     const text = res.text?.trim() || '';
     if (text) {
       const parsed = JSON.parse(text);
-      if (Array.isArray(parsed) && parsed.length > 0) {
-        const validItems: GeneratedQuestionItem[] = parsed.slice(0, 10).map((item, idx) => ({
+      let itemsArray: any[] = [];
+      if (Array.isArray(parsed)) {
+        itemsArray = parsed;
+      } else if (parsed && Array.isArray(parsed.questions)) {
+        itemsArray = parsed.questions;
+      } else if (parsed && typeof parsed === 'object') {
+        const found = Object.values(parsed).find((val) => Array.isArray(val));
+        if (Array.isArray(found)) itemsArray = found;
+      }
+
+      if (itemsArray.length > 0) {
+        const validItems: GeneratedQuestionItem[] = itemsArray.slice(0, 10).map((item, idx) => ({
           id: `q_${idx + 1}`,
           order_index: idx + 1,
           question: item.question || fallback[idx]?.question || 'Recommended provider query',

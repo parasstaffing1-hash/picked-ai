@@ -4,11 +4,13 @@ export interface QuestionObservationRecord {
   questionId: string;
   orderIndex: number;
   question: string;
-  engine: 'openai' | 'gemini' | 'google_search';
+  engine: 'openai' | 'gemini' | 'google_ai_overview' | 'google_search';
   analysis: StructuredAnalysisResult;
   directUrlCited: boolean;
   rawResponse?: string;
   citations?: Array<{ title?: string; url: string; domain?: string }>;
+  status?: 'success' | 'failed' | 'timeout';
+  error?: string;
 }
 
 export interface CalculatedScores {
@@ -16,6 +18,10 @@ export interface CalculatedScores {
   openai_score: number;
   gemini_score: number;
   google_score: number;
+  openai_available?: boolean;
+  gemini_available?: boolean;
+  google_available?: boolean;
+  is_partial?: boolean;
   questions_checked: number;
   questions_mentioned: number;
   mention_rate: number; // percentage
@@ -71,6 +77,17 @@ export function calculateVisibilityScores(
   observations: QuestionObservationRecord[],
   totalQuestionsCount = 10
 ): CalculatedScores {
+  const openaiObs = observations.filter((o) => o.engine === 'openai');
+  const geminiObs = observations.filter((o) => o.engine === 'gemini');
+  const googleObs = observations.filter(
+    (o) => o.engine === 'google_ai_overview' || o.engine === 'google_search'
+  );
+
+  // An engine is available if it has observations and not all of them failed
+  const openai_available = openaiObs.length > 0 && openaiObs.some((o) => o.status !== 'failed');
+  const gemini_available = geminiObs.length > 0 && geminiObs.some((o) => o.status !== 'failed');
+  const google_available = googleObs.length > 0 && googleObs.some((o) => o.status !== 'failed');
+
   const openaiScores: number[] = [];
   const geminiScores: number[] = [];
   const googleScores: number[] = [];
@@ -86,7 +103,7 @@ export function calculateVisibilityScores(
       openaiScores.push(obsScore);
     } else if (obs.engine === 'gemini') {
       geminiScores.push(obsScore);
-    } else if (obs.engine === 'google_search') {
+    } else if (obs.engine === 'google_ai_overview' || obs.engine === 'google_search') {
       googleScores.push(obsScore);
     }
 
@@ -109,12 +126,48 @@ export function calculateVisibilityScores(
   const gemini_score = avg(geminiScores);
   const google_score = avg(googleScores);
 
-  // Overall Score weighting: 40% OpenAI, 40% Gemini, 20% Google Search
+  // Dynamic weighting based on active/available engines to support partial scans honestly
+  let totalWeight = 0;
+  let weightedSum = 0;
+  const engineWeights: Record<string, string> = {};
+
+  if (openai_available) {
+    const w = 40;
+    totalWeight += w;
+    weightedSum += openai_score * w;
+    engineWeights['ChatGPT (OpenAI)'] = '40% weight (Active)';
+  } else if (openaiObs.length > 0) {
+    engineWeights['ChatGPT (OpenAI)'] = 'Not Audited / Unavailable';
+  }
+
+  if (gemini_available) {
+    const w = 40;
+    totalWeight += w;
+    weightedSum += gemini_score * w;
+    engineWeights['Google Gemini'] = '40% weight (Active)';
+  } else if (geminiObs.length > 0) {
+    engineWeights['Google Gemini'] = 'Not Audited / Unavailable';
+  }
+
+  if (google_available) {
+    const w = 20;
+    totalWeight += w;
+    weightedSum += google_score * w;
+    engineWeights['Google AI Overviews'] = '20% weight (Active)';
+  } else if (googleObs.length > 0) {
+    engineWeights['Google AI Overviews'] = 'Not Audited / Unavailable';
+  }
+
   let overall_score = 0;
-  if (googleScores.length > 0) {
-    overall_score = Math.round(openai_score * 0.4 + gemini_score * 0.4 + google_score * 0.2);
+  if (totalWeight > 0) {
+    overall_score = Math.round(weightedSum / totalWeight);
   } else {
-    overall_score = Math.round(openai_score * 0.5 + gemini_score * 0.5);
+    // If no status flags were passed (e.g. legacy/mock tests), fallback to standard formula
+    if (googleScores.length > 0) {
+      overall_score = Math.round(openai_score * 0.4 + gemini_score * 0.4 + google_score * 0.2);
+    } else {
+      overall_score = Math.round(openai_score * 0.5 + gemini_score * 0.5);
+    }
   }
 
   overall_score = Math.min(100, Math.max(0, overall_score));
@@ -129,12 +182,17 @@ export function calculateVisibilityScores(
   const questions_checked = totalQuestionsCount;
   const questions_mentioned = questionsWithMention.size;
   const mention_rate = questions_checked > 0 ? Math.round((questions_mentioned / questions_checked) * 100) : 0;
+  const is_partial = !openai_available || !gemini_available || !google_available;
 
   return {
     overall_score,
     openai_score,
     gemini_score,
     google_score,
+    openai_available,
+    gemini_available,
+    google_available,
+    is_partial,
     questions_checked,
     questions_mentioned,
     mention_rate,
@@ -144,11 +202,7 @@ export function calculateVisibilityScores(
     methodology: {
       description:
         'The Picked AI Visibility Score evaluates brand presence, recommendation rank, and source citations across real consumer prompts.',
-      engineWeights: {
-        'ChatGPT (OpenAI)': '40% weight',
-        'Google Gemini': '40% weight',
-        'Google Search Visibility': '20% weight',
-      },
+      engineWeights,
       scoringRules: [
         'Brand Mentioned: Base 50 points',
         'Ranked #1 Position: +40 points (90 total)',

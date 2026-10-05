@@ -1,21 +1,31 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useRouter } from 'next/navigation';
 import { SupportedLanguage } from '@/types/scanner';
-import { DarkHeroForm } from '@/components/scanner/DarkHeroForm';
+import { SiteNavigation } from '@/components/ui/site-navigation';
+import { PrismaHero } from '@/components/ui/prisma-hero';
+import { HeroTransition } from '@/components/ui/workspace/hero-transition';
+import { AiVisibilityOverview } from '@/components/ui/workspace/ai-visibility-overview';
+import { BuyerPromptsTable } from '@/components/ui/workspace/buyer-prompts-table';
+import { AiAnswerInspector } from '@/components/ui/workspace/ai-answer-inspector';
+import { CitationIntelligence } from '@/components/ui/workspace/citation-intelligence';
+import { CompetitiveVisibility } from '@/components/ui/workspace/competitive-visibility';
+import { Opportunities } from '@/components/ui/workspace/opportunities';
+import { VisibilityMonitor } from '@/components/ui/workspace/visibility-monitor';
+import { SiteFooter } from '@/components/ui/site-footer';
+import { QuickScanDrawer } from '@/components/ui/quick-scan-drawer';
 import { RealProgressView, RealScanStatusData } from '@/components/scanner/RealProgressView';
 import { FullReportPage, FullReportData } from '@/components/report/FullReportPage';
 import { LeadsModal } from '@/components/scanner/LeadsModal';
-import { Sparkles, Users, Globe, ExternalLink, Zap, AlertCircle, X } from 'lucide-react';
+import { AlertCircle, X, ArrowLeft } from 'lucide-react';
 
 export default function HomePage() {
-  const router = useRouter();
   const [language, setLanguage] = useState<SupportedLanguage>('en');
   const [activeScan, setActiveScan] = useState<RealScanStatusData | null>(null);
   const [completedReport, setCompletedReport] = useState<FullReportData | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [isLeadsModalOpen, setIsLeadsModalOpen] = useState(false);
+  const [isScanDrawerOpen, setIsScanDrawerOpen] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
   // Poll for scan status when a scan is active
@@ -78,9 +88,11 @@ export default function HomePage() {
           message: language === 'et' ? 'Töö lisati järjekorda...' : 'Scan queued in background runner...',
         },
       });
+      setIsScanDrawerOpen(false);
     } catch (err: any) {
       setErrorMessage(err.message || 'An error occurred while starting the scan.');
       setIsLoading(false);
+      throw err;
     }
   };
 
@@ -92,72 +104,17 @@ export default function HomePage() {
   };
 
   return (
-    <div className="min-h-screen bg-[#070b14] text-slate-100 flex flex-col font-sans selection:bg-amber-400 selection:text-slate-950">
-      {/* Top Navigation */}
-      <header className="border-b border-slate-800/80 bg-[#070b14]/90 backdrop-blur-md sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-400 to-yellow-500 flex items-center justify-center text-slate-950 shadow-md shadow-amber-400/20 font-black">
-              <Zap className="w-5 h-5 text-slate-950" />
-            </div>
-            <div>
-              <div className="flex items-center gap-2">
-                <span className="font-extrabold text-white tracking-tight text-lg">Picked AI</span>
-                <span className="bg-amber-400/10 text-amber-400 border border-amber-400/20 text-xs font-bold px-2 py-0.5 rounded">
-                  Visibility Scanner
-                </span>
-              </div>
-              <p className="text-[11px] text-slate-400 hidden sm:block">
-                14-Day MVP • Multi-Model GEO Engine
-              </p>
-            </div>
-          </div>
-
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => setIsLeadsModalOpen(true)}
-              className="px-2.5 py-1 text-xs font-semibold rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-300 hover:text-white flex items-center gap-1.5 transition-colors cursor-pointer"
-              title="View captured leads"
-            >
-              <Users className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">{language === 'et' ? 'Liidid' : 'Leads'}</span>
-            </button>
-
-            <span className="text-xs text-slate-400 hidden md:inline">
-              {language === 'et' ? 'Tulemused alla 3 min' : 'Target < 3 min parallel scan'}
-            </span>
-
-            <div className="flex items-center bg-slate-900 border border-slate-800 rounded-lg p-0.5">
-              <button
-                onClick={() => setLanguage('en')}
-                className={`px-2 py-1 text-xs font-semibold rounded-md transition-all ${
-                  language === 'en' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                EN
-              </button>
-              <button
-                onClick={() => setLanguage('et')}
-                className={`px-2 py-1 text-xs font-semibold rounded-md transition-all ${
-                  language === 'et' ? 'bg-amber-400 text-slate-950 font-bold' : 'text-slate-400 hover:text-white'
-                }`}
-              >
-                ET
-              </button>
-            </div>
-          </div>
-        </div>
-      </header>
-
-      {/* Global Inline Error Banner */}
+    <div className="min-h-screen bg-[#050505] text-[#E8E6D5] selection:bg-[#E8E6D5] selection:text-[#050505] font-sans antialiased overflow-x-hidden">
+      {/* Global Error Banner */}
       {errorMessage && (
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 pt-4 w-full">
-          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-xl flex items-center justify-between gap-3">
+        <div className="fixed top-24 left-1/2 -translate-x-1/2 z-50 max-w-xl w-[92%]">
+          <div className="p-3.5 bg-rose-500/10 border border-rose-500/30 text-rose-300 text-xs rounded-xl flex items-center justify-between gap-3 backdrop-blur-xl">
             <div className="flex items-center gap-2">
               <AlertCircle className="w-4 h-4 text-rose-400 shrink-0" />
               <span>{errorMessage}</span>
             </div>
             <button
+              type="button"
               onClick={() => setErrorMessage(null)}
               className="text-rose-400 hover:text-rose-200 p-0.5"
             >
@@ -167,48 +124,125 @@ export default function HomePage() {
         </div>
       )}
 
-      {/* Main View Area */}
-      <main className="flex-1 flex flex-col justify-center">
-        {completedReport ? (
+      {/* Render Active Scan Progress View */}
+      {activeScan && activeScan.status !== 'completed' ? (
+        <div className="min-h-screen py-16 px-4 sm:px-6 flex flex-col justify-center items-center">
+          <div className="w-full max-w-4xl mb-6 flex justify-between items-center">
+            <button
+              onClick={handleReset}
+              className="inline-flex items-center gap-2 text-xs font-mono text-[rgba(232,230,213,0.60)] hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Back to Studio</span>
+            </button>
+          </div>
+          <RealProgressView scan={activeScan} language={language} onRetry={handleReset} />
+        </div>
+      ) : completedReport ? (
+        /* Render Full Report View */
+        <div className="min-h-screen py-10">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 mb-6">
+            <button
+              onClick={handleReset}
+              className="inline-flex items-center gap-2 text-xs font-mono text-[rgba(232,230,213,0.60)] hover:text-white transition-colors"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              <span>Return to Public Site</span>
+            </button>
+          </div>
           <FullReportPage report={completedReport} />
-        ) : activeScan && activeScan.status !== 'completed' ? (
-          <RealProgressView
-            scan={activeScan}
-            language={language}
-            onRetry={handleReset}
-          />
-        ) : (
-          <DarkHeroForm
+        </div>
+      ) : (
+        /* ══════════════════════════════════════════════════════
+           PICKED AI — Cinematic Hero + Notion/Linear Workspace
+           ══════════════════════════════════════════════════════ */
+        <>
+          {/* Floating Adaptive Navigation */}
+          <SiteNavigation
             language={language}
             onLanguageChange={setLanguage}
+            onOpenScan={() => setIsScanDrawerOpen(true)}
+            onOpenLeads={() => setIsLeadsModalOpen(true)}
+          />
+
+          {/* ── HERO (Canonical Picked Hero — Preserved Exactly) ── */}
+          <PrismaHero
+            language={language}
+            onLanguageChange={setLanguage}
+            onOpenScan={() => setIsScanDrawerOpen(true)}
+            onOpenLeads={() => setIsLeadsModalOpen(true)}
             onSubmit={handleStartScan}
             isLoading={isLoading}
           />
-        )}
-      </main>
 
-      {/* Leads Modal */}
+          {/* ── TRANSITION: Dark Hero → Light Workspace ── */}
+          <HeroTransition />
+
+          {/* ══════════════════════════════════════════════
+              WORKSPACE SECTIONS (Notion / Linear Aesthetic)
+              Light background · Editorial typography · Clean data
+              ══════════════════════════════════════════════ */}
+          <div className="workspace-surface bg-[#FAFAF8] text-[#1A1A1A] selection:bg-[#1A1A1A] selection:text-white">
+
+            {/* 01 — AI VISIBILITY OVERVIEW */}
+            <section id="overview">
+              <AiVisibilityOverview onOpenScan={() => setIsScanDrawerOpen(true)} />
+            </section>
+
+            {/* 02 — BUYER PROMPTS TABLE */}
+            <section id="prompts">
+              <BuyerPromptsTable />
+            </section>
+
+            {/* 03 — AI ANSWER INSPECTOR */}
+            <section id="inspector">
+              <AiAnswerInspector />
+            </section>
+
+            {/* 04 — CITATION INTELLIGENCE */}
+            <section id="citations">
+              <CitationIntelligence />
+            </section>
+
+            {/* 05 — COMPETITIVE VISIBILITY */}
+            <section id="competitors">
+              <CompetitiveVisibility />
+            </section>
+
+            {/* 06 — OPPORTUNITIES */}
+            <section id="opportunities">
+              <Opportunities />
+            </section>
+
+            {/* 07 — VISIBILITY MONITOR */}
+            <section id="monitor">
+              <VisibilityMonitor />
+            </section>
+          </div>
+
+          {/* ── FOOTER ── */}
+          <SiteFooter
+            language={language}
+            onOpenScan={() => setIsScanDrawerOpen(true)}
+          />
+        </>
+      )}
+
+      {/* Interactive Quick Scan Drawer / Modal */}
+      <QuickScanDrawer
+        isOpen={isScanDrawerOpen}
+        onClose={() => setIsScanDrawerOpen(false)}
+        onSubmit={handleStartScan}
+        isLoading={isLoading}
+        language={language}
+      />
+
+      {/* Captured Leads Vault Modal */}
       <LeadsModal
         isOpen={isLeadsModalOpen}
         onClose={() => setIsLeadsModalOpen(false)}
         language={language}
       />
-
-      {/* Footer */}
-      <footer className="border-t border-slate-800/80 bg-slate-950/70 py-6 text-xs text-slate-500">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col sm:flex-row items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="font-bold text-slate-300">Picked AI Visibility Scanner</span>
-            <span>•</span>
-            <span>PostgreSQL & Trigger.dev & Crawl4AI Architecture</span>
-          </div>
-          <div>
-            {language === 'et'
-              ? 'Toetatud mudelid: OpenAI (ChatGPT), Google Gemini & orgaaniline otsing'
-              : 'Audits ChatGPT, Gemini and search-driven visibility across customer intents'}
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

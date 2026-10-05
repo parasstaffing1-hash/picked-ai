@@ -253,6 +253,48 @@ async function runAllTests() {
   assert(savedReport !== null, 'Retrieves persisted report by scanId');
   assert(savedReport?.overall_score === 85, 'Persisted report retains accurate overall score');
 
+  // 13. URL Subpath Preservation
+  console.log('\n--- 13. URL Subpath Preservation ---');
+  const pathUrl = validateAndNormalizeUrl('veriff.com/services/identity');
+  assert(pathUrl.valid && pathUrl.normalizedUrl === 'https://veriff.com/services/identity', 'Preserves legitimate URL subpaths while sanitizing');
+
+  // 14. DNS Resolution SSRF Check
+  console.log('\n--- 14. DNS Resolution SSRF Check ---');
+  const { validateHostResolution } = await import('../lib/security/validation');
+  const safeHost = await validateHostResolution('google.com');
+  const unsafeHost = await validateHostResolution('127.0.0.1');
+  assert(safeHost === true, 'Allows legitimate public domain resolution');
+  assert(unsafeHost === false, 'Blocks private loopback host resolution');
+
+  // 15. Honest Partial Scan Scoring
+  console.log('\n--- 15. Honest Partial Scan Scoring ---');
+  const partialObservations: QuestionObservationRecord[] = [
+    {
+      questionId: 'q1',
+      orderIndex: 1,
+      question: 'Best identity verification',
+      engine: 'gemini',
+      analysis: analysis1,
+      directUrlCited: true,
+      status: 'success',
+    },
+    {
+      questionId: 'q1',
+      orderIndex: 1,
+      question: 'Best identity verification',
+      engine: 'openai',
+      analysis: { businessMentioned: false, position: null, confidence: 0, evidence: '', competitors: [], sources: [] },
+      directUrlCited: false,
+      status: 'failed',
+      error: 'OPENAI_API_KEY not configured',
+    },
+  ];
+  const partialScores = calculateVisibilityScores(partialObservations, 1);
+  assert(partialScores.is_partial === true, 'Correctly flags scan as partial when a provider fails');
+  assert(partialScores.gemini_available === true, 'Gemini is recognized as active/available');
+  assert(partialScores.openai_available === false, 'OpenAI is recognized as unavailable/failed');
+  assert(partialScores.overall_score > 0, 'Calculates honest score from active provider without dragging down to 0');
+
   // Summary
   console.log('\n========================================');
   console.log(` TEST SUMMARY: ${passed} PASSED, ${failed} FAILED`);

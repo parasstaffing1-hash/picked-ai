@@ -57,7 +57,7 @@ CREATE TABLE IF NOT EXISTS public.ai_responses (
     id TEXT PRIMARY KEY DEFAULT gen_random_uuid()::text,
     scan_id TEXT NOT NULL REFERENCES public.scans(id) ON DELETE CASCADE,
     question_id TEXT NOT NULL REFERENCES public.questions(id) ON DELETE CASCADE,
-    engine TEXT NOT NULL CHECK (engine IN ('openai', 'gemini', 'google_search')),
+    engine TEXT NOT NULL CHECK (engine IN ('openai', 'gemini', 'google_ai_overview', 'google_search')),
     model TEXT NOT NULL,
     raw_response TEXT,
     response_json JSONB,

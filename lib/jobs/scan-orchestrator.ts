@@ -1,7 +1,13 @@
 import { SupportedLanguage } from '@/types/scanner';
 import { crawlAndExtractBusiness, ExtractedBusinessData } from '../crawler/multi-page-crawler';
 import { generate10CustomerQuestions, GeneratedQuestionItem } from '../questions/generator';
-import { executeOpenAICheck, executeGeminiCheck, executeGoogleSearchCheck, EngineObservation } from '../ai/engines';
+import {
+  executeOpenAICheck,
+  executeGeminiCheck,
+  executeGoogleAIOverviewCheck,
+  executeGoogleSearchCheck,
+  EngineObservation,
+} from '../ai/engines';
 import { analyzeAIResponseWithAI, StructuredAnalysisResult } from '../analysis/response-analyzer';
 import { calculateVisibilityScores, QuestionObservationRecord } from '../scoring/calculator';
 import {
@@ -20,6 +26,11 @@ export interface ScanJobRuntimeProgress {
   totalChecks: number;
   completedChecks: number;
   currentMessage: string;
+  engineStatus?: {
+    openai: 'pending' | 'running' | 'completed' | 'failed';
+    gemini: 'pending' | 'running' | 'completed' | 'failed';
+    google_ai_overview: 'pending' | 'running' | 'completed' | 'failed';
+  };
 }
 
 // In-memory runtime progress tracking for live UI polling (shared across Next.js route chunks)
@@ -135,11 +146,11 @@ export async function executeBackgroundScan(
         batchQuestions.map(async (q) => {
           const qDbId = `q_${scanId}_${q.order_index}`;
 
-          // Run OpenAI, Gemini, and Google Search concurrently for this question
+          // Run OpenAI, Gemini, and Google AI Overviews concurrently for this question
           const [openaiObs, geminiObs, googleObs] = await Promise.all([
             executeOpenAICheck(q.question, business.business_name),
             executeGeminiCheck(q.question, business.business_name),
-            executeGoogleSearchCheck(q.question, business.domain, business.business_name),
+            executeGoogleAIOverviewCheck(q.question, business.domain, business.business_name),
           ]);
 
           const rawList: EngineObservation[] = [openaiObs, geminiObs, googleObs];
@@ -150,7 +161,12 @@ export async function executeBackgroundScan(
               scanId,
               totalChecks: totalObservationsCount,
               completedChecks: completedCount,
-              currentMessage: `Checking AI visibility (${completedCount} / ${totalObservationsCount} checks)...`,
+              currentMessage: `Auditing ChatGPT, Gemini, and Google AI Overviews (${completedCount} / ${totalObservationsCount} checks)...`,
+              engineStatus: {
+                openai: openaiObs.status === 'failed' ? 'failed' : 'running',
+                gemini: geminiObs.status === 'failed' ? 'failed' : 'running',
+                google_ai_overview: googleObs.status === 'failed' ? 'failed' : 'running',
+              },
             });
 
             // Save AI Response to database
@@ -223,6 +239,8 @@ export async function executeBackgroundScan(
               directUrlCited,
               rawResponse: obs.rawResponse,
               citations: obs.citations,
+              status: obs.status,
+              error: obs.error,
             });
           }
         })
@@ -245,6 +263,11 @@ export async function executeBackgroundScan(
       totalChecks: totalObservationsCount,
       completedChecks: totalObservationsCount,
       currentMessage: 'Calculating overall AI visibility score and recommendations...',
+      engineStatus: {
+        openai: 'completed',
+        gemini: 'completed',
+        google_ai_overview: 'completed',
+      },
     });
 
     const calculatedScores = calculateVisibilityScores(observations, questions.length);
@@ -255,7 +278,7 @@ export async function executeBackgroundScan(
       const qObs = observations.filter((o) => o.questionId === qDbId);
       const openaiObs = qObs.find((o) => o.engine === 'openai');
       const geminiObs = qObs.find((o) => o.engine === 'gemini');
-      const googleObs = qObs.find((o) => o.engine === 'google_search');
+      const googleObs = qObs.find((o) => o.engine === 'google_ai_overview' || o.engine === 'google_search');
 
       return {
         orderIndex: q.order_index,
@@ -268,6 +291,8 @@ export async function executeBackgroundScan(
           competitors: openaiObs.analysis.competitors,
           sources: openaiObs.analysis.sources,
           rawResponse: openaiObs.rawResponse || openaiObs.analysis.evidence,
+          status: openaiObs.status,
+          error: openaiObs.error,
         } : null,
         gemini: geminiObs ? {
           mentioned: geminiObs.analysis.businessMentioned,
@@ -276,6 +301,8 @@ export async function executeBackgroundScan(
           competitors: geminiObs.analysis.competitors,
           sources: geminiObs.analysis.sources,
           rawResponse: geminiObs.rawResponse || geminiObs.analysis.evidence,
+          status: geminiObs.status,
+          error: geminiObs.error,
         } : null,
         google: googleObs ? {
           visible: googleObs.analysis.businessMentioned,
@@ -283,6 +310,8 @@ export async function executeBackgroundScan(
           snippet: googleObs.analysis.evidence,
           sources: googleObs.analysis.sources,
           rawResponse: googleObs.rawResponse || googleObs.analysis.evidence,
+          status: googleObs.status,
+          error: googleObs.error,
         } : null,
       };
     });

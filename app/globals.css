@@ -1,1 +1,122 @@
 @import "tailwindcss";
+
+@layer base {
+  :root {
+    /* ── Dark Hero Tokens ── */
+    --picked-base: #050505;
+    --picked-secondary: #0A0A09;
+    --picked-elevated: #11110F;
+    --picked-main: #E8E6D5;
+    --picked-secondary-text: rgba(232, 230, 213, 0.62);
+    --picked-muted-text: rgba(232, 230, 213, 0.40);
+    --picked-border-subtle: rgba(232, 230, 213, 0.10);
+    --picked-border-strong: rgba(232, 230, 213, 0.18);
+    --picked-accent: #E8B400;
+
+    /* ── Light Workspace Tokens (Notion / Linear aesthetic) ── */
+    --ws-bg: #FAFAF8;
+    --ws-surface: #FFFFFF;
+    --ws-text: #1A1A1A;
+    --ws-text-secondary: #6B6B6B;
+    --ws-text-muted: #9B9B9B;
+    --ws-border: #E8E8E6;
+    --ws-border-subtle: #F0F0EE;
+    --ws-hover: #F5F5F3;
+    --ws-accent: #E8B400;
+  }
+
+  html {
+    scroll-behavior: smooth;
+    background-color: #050505;
+  }
+
+  body {
+    background-color: #050505;
+    color: #E8E6D5;
+    font-feature-settings: "cv02", "cv03", "cv04", "cv11";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow-x: hidden;
+  }
+
+  ::selection {
+    background-color: #E8E6D5;
+    color: #050505;
+  }
+}
+
+/* Fine film grain noise overlay */
+.noise-overlay {
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)' opacity='0.06'/%3E%3C/svg%3E");
+}
+
+/* Custom modern scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: #050505;
+}
+::-webkit-scrollbar-thumb {
+  background: #222220;
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #3e3d36;
+}
+
+/* Workspace sections get light scrollbar */
+.workspace-surface ::-webkit-scrollbar-track {
+  background: #FAFAF8;
+}
+.workspace-surface ::-webkit-scrollbar-thumb {
+  background: #D4D4D2;
+}
+.workspace-surface ::-webkit-scrollbar-thumb:hover {
+  background: #B0B0AE;
+}
+
+/* Keyframes & Animations */
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { opacity: 0.4; transform: scale(1); }
+  50% { opacity: 0.8; transform: scale(1.04); }
+}
+
+.animate-shimmer {
+  animation: shimmer 2.2s infinite;
+}
+
+.animate-pulse-glow {
+  animation: pulseGlow 4s ease-in-out infinite;
+}
+
+/* Glassmorphism & Precision Panels */
+.glass-panel {
+  background: rgba(12, 18, 34, 0.85);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.05) inset, 0 20px 40px -15px rgba(0, 0, 0, 0.5);
+}
+
+.glass-panel-elevated {
+  background: rgba(16, 24, 44, 0.9);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow: 0 1px 0 0 rgba(255, 255, 255, 0.08) inset, 0 24px 48px -12px rgba(0, 0, 0, 0.7);
+}
+
+/* Ambient Background Grid Pattern */
+.bg-grid-pattern {
+  background-size: 32px 32px;
+  background-image: 
+    linear-gradient(to right, rgba(255, 255, 255, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+}

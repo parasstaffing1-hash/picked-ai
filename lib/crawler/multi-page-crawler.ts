@@ -1,7 +1,7 @@
 import * as cheerio from 'cheerio';
 import { GoogleGenAI } from '@google/genai';
 import { SupportedLanguage } from '@/types/scanner';
-import { validateAndNormalizeUrl } from '../security/validation';
+import { validateAndNormalizeUrl, validateHostResolution } from '../security/validation';
 
 export interface ExtractedBusinessData {
   business_name: string;
@@ -42,6 +42,13 @@ async function fetchPage(targetUrl: string, timeoutMs = 8000, maxRedirects = 3):
     }
 
     try {
+      const parsedHostname = new URL(currentUrl).hostname;
+      const isSafeDns = await validateHostResolution(parsedHostname);
+      if (!isSafeDns) {
+        console.warn(`[Crawler DNS SSRF Block] Hostname ${parsedHostname} resolved to blocked IP`);
+        return null;
+      }
+
       const controller = new AbortController();
       const timeout = setTimeout(() => controller.abort(), timeoutMs);
 
@@ -219,6 +226,11 @@ export async function crawlAndExtractBusiness(
   );
 
   const validPages = [homeContent, ...subpageContents].filter((p): p is SinglePageContent => Boolean(p));
+
+  // If no pages could be reached and not in demo mode, report explicit failure
+  if (validPages.length === 0 && process.env.DEMO_MODE !== 'true') {
+    throw new Error(`Website could not be reached or blocked crawling: ${domain}`);
+  }
 
   // Synthesize text extracts
   const combinedHeadings = Array.from(new Set(validPages.flatMap((p) => p.headings))).slice(0, 15);

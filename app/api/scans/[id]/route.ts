@@ -40,11 +40,17 @@ export async function GET(
               total: liveProgress.totalChecks,
               completed: liveProgress.completedChecks,
               message: liveProgress.currentMessage,
+              engineStatus: liveProgress.engineStatus,
             }
           : {
               total: 30,
               completed: scan.status === 'completed' ? 30 : Math.round((scan.progress / 100) * 30),
               message: scan.status === 'completed' ? 'Completed' : 'Processing...',
+              engineStatus: {
+                openai: scan.status === 'completed' ? 'completed' : 'pending',
+                gemini: scan.status === 'completed' ? 'completed' : 'pending',
+                google_ai_overview: scan.status === 'completed' ? 'completed' : 'pending',
+              },
             },
       },
       report,

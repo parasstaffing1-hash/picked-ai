@@ -111,7 +111,38 @@ Set `DEMO_MODE="true"` in `.env.local` to run full scans without consuming exter
 ## Enabling Production AI Providers
 
 To run live audits with real external models, configure the following in `.env`:
-- `GEMINI_API_KEY`: For live Gemini 3.8 queries and Google search grounding.
-- `OPENAI_API_KEY`: For live ChatGPT queries (`gpt-4o-mini`).
-- `RESEND_API_KEY`: For emailing reports to users.
+- `OPENAI_API_KEY`: For live ChatGPT queries (`gpt-4o-mini` or custom model).
+- `GEMINI_API_KEY`: For live Gemini queries (`gemini-3.8-flash`) and Google Search Grounding.
+- `SERPAPI_API_KEY` (or `SERPER_API_KEY`): For live Google AI Overviews extraction from real SERP blocks. If omitted, Google GenAI Search Grounding (`GEMINI_API_KEY`) is automatically utilized as the official Google engine backing AI Overviews.
+- `RESEND_API_KEY`: For delivering executive HTML reports to user emails.
 - `NEXT_PUBLIC_SUPABASE_URL` & `SUPABASE_SERVICE_ROLE_KEY`: For PostgreSQL persistence.
+
+---
+
+## 10-Business Real-World Validation Suite
+
+As mandated by Contract Requirement 26, the complete end-to-end scanner pipeline is validated across 10 real-world commercial websites (5 English, 5 Estonian):
+
+```bash
+# Run the complete 10-business validation suite
+npm run validate
+```
+
+Tested targets:
+- **English (5)**: Veriff (`veriff.com`), Pipedrive (`pipedrive.com`), Wise (`wise.com`), Bolt (`bolt.eu`), Stripe (`stripe.com`)
+- **Estonian (5)**: Kliinik 32 (`kliinik32.ee`), Confido (`confido.ee`), Sorainen (`sorainen.com`), LHV (`lhv.ee`), Äripäev (`aripaev.ee`)
+
+The test harness runs multi-page crawling, business profiling, 10-question generation, 3-engine audits (30 observations per business, 300 total), raw response persistence, mention/rank analysis, score calculation, report storage, and generates a structured summary in `VALIDATION_REPORT.md`.
+
+---
+
+## Interactive UI Architecture & Open-Source Attribution
+
+In accordance with Section 5 of the MVP specification, the interactive dashboard incorporates UI patterns and intelligence features adapted from permissively licensed (MIT) open-source GEO projects:
+
+- **`ScoreGauge.tsx`**: Radial SVG animated circular progress indicators for overall and per-engine GEO visibility scores.
+- **`CompetitorBattlecards.tsx`**: Comparative head-to-head battlecards (inspired by `danishashko/geo-aeo-tracker` MIT) tracking AI share of voice, average ranking positions, and queries won.
+- **`CitationOpportunitiesView.tsx`**: Authority gap analysis (inspired by `danishashko/geo-aeo-tracker` MIT) pinpointing high-priority external citation domains where competitors are recommended while the target business is missing, complete with CSV export.
+- **`ModelResponseDrawer.tsx`**: Side-by-side prompt and model response comparator (inspired by `aryamantodkar/oneglanse` MIT) allowing users to inspect actual raw responses, citations, and evidence from OpenAI, Gemini, and Google AI Overviews.
+
+

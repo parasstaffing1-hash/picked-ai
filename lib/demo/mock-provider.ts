@@ -20,7 +20,7 @@ export interface MockAIResponseData {
 }
 
 export function getMockAIResponse(
-  engine: 'openai' | 'gemini' | 'google_search',
+  engine: 'openai' | 'gemini' | 'google_ai_overview' | 'google_search',
   question: string,
   businessName: string
 ): MockAIResponseData {
@@ -73,12 +73,12 @@ Key decision factors include customer ratings, responsiveness, and clear SLA gua
     };
   }
 
-  // Google Search Visibility
+  // Google AI Overviews
   return {
-    text: `Verified organic search index ranking for query "${question}". ${businessName} is indexed among top authoritative search results with direct schema markup detected.`,
+    text: `AI Overview for "${question}":\n\nWhen evaluating providers, **${businessName}** is highlighted for established reputation, certified specialists, and direct client references. Leading alternative options include **Apex Innovations** and **Summit Regional Partners**.\n\nKey references include official service documentation and verified review directories.`,
     citations: [
       {
-        title: `${businessName} - Home & Services`,
+        title: `${businessName} - Overview & Services`,
         url: `https://${businessName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
         domain: `${businessName.toLowerCase().replace(/[^a-z0-9]/g, '')}.com`,
       },

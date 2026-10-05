@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { getSupabase } from './supabase';
+import { pgQuery } from './postgres';
 
 const DATA_DIR = path.join(process.cwd(), '.next', 'cache', 'picked_ai_data');
 function ensureDataDir() {
@@ -74,7 +75,7 @@ export interface DBAIResponse {
   id: string;
   scan_id: string;
   question_id: string;
-  engine: 'openai' | 'gemini' | 'google_search';
+  engine: 'openai' | 'gemini' | 'google_ai_overview' | 'google_search';
   model: string;
   raw_response: string;
   response_json?: any;
@@ -146,7 +147,7 @@ if (!globalWithStore.__picked_ai_store) {
     aiResponses: new Map<string, DBAIResponse[]>(),
     mentions: new Map<string, DBMention[]>(),
     competitors: new Map<string, DBCompetitor[]>(),
-    sources: new Map<string, DBSource[]>,
+    sources: new Map<string, DBSource[]>(),
     reports: new Map<string, DBReport>(),
   };
 }
@@ -155,6 +156,7 @@ const store = globalWithStore.__picked_ai_store;
 
 /**
  * Finds or creates a lead by email address.
+ * Primary: PostgreSQL (via pgQuery) -> Fallback: Supabase -> In-memory cache
  */
 export async function findOrCreateLead(email: string): Promise<DBLead> {
   const normalized = email.trim().toLowerCase();
@@ -166,6 +168,32 @@ export async function findOrCreateLead(email: string): Promise<DBLead> {
     }
   }
 
+  // 1. Direct PostgreSQL
+  try {
+    const existing = await pgQuery<DBLead>(
+      'SELECT id, email, created_at FROM public.leads WHERE LOWER(email) = $1 LIMIT 1',
+      [normalized]
+    );
+    if (existing && existing.rows.length > 0) {
+      const found = existing.rows[0];
+      store.leads.set(found.id, found);
+      return found;
+    }
+
+    const inserted = await pgQuery<DBLead>(
+      'INSERT INTO public.leads (email) VALUES ($1) ON CONFLICT (email) DO UPDATE SET email = EXCLUDED.email RETURNING id, email, created_at',
+      [normalized]
+    );
+    if (inserted && inserted.rows.length > 0) {
+      const created = inserted.rows[0];
+      store.leads.set(created.id, created);
+      return created;
+    }
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL findOrCreateLead error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -195,6 +223,7 @@ export async function findOrCreateLead(email: string): Promise<DBLead> {
     }
   }
 
+  // 3. In-memory / File fallback
   const newLead: DBLead = {
     id: `lead_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`,
     email: normalized,
@@ -209,6 +238,18 @@ export async function findOrCreateLead(email: string): Promise<DBLead> {
  * Retrieves all leads for admin reporting.
  */
 export async function getAllLeads(): Promise<DBLead[]> {
+  // 1. Direct PostgreSQL
+  try {
+    const res = await pgQuery<DBLead>('SELECT id, email, created_at FROM public.leads ORDER BY created_at DESC');
+    if (res && res.rows.length > 0) {
+      for (const l of res.rows) store.leads.set(l.id, l);
+      return res.rows;
+    }
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL getAllLeads error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -223,6 +264,7 @@ export async function getAllLeads(): Promise<DBLead[]> {
     } catch {}
   }
 
+  // 3. Cache fallback
   const cached = readCacheFile<DBLead[]>('leads.json');
   if (cached && Array.isArray(cached)) {
     for (const l of cached) store.leads.set(l.id, l);
@@ -256,6 +298,19 @@ export async function createScanRecord(data: {
   store.scans.set(scan.id, scan);
   writeCacheFile(`scan_${scan.id}.json`, scan);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `INSERT INTO public.scans (id, lead_id, url, language, status, progress, started_at, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (id) DO NOTHING`,
+      [scan.id, scan.lead_id, scan.url, scan.language, scan.status, scan.progress, scan.started_at, scan.created_at]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL createScanRecord error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -269,9 +324,7 @@ export async function createScanRecord(data: {
         started_at: scan.started_at,
         created_at: scan.created_at,
       });
-    } catch (err) {
-      // Non-blocking
-    }
+    } catch {}
   }
 
   return scan;
@@ -294,6 +347,36 @@ export async function updateScanStatus(
   store.scans.set(id, scan);
   writeCacheFile(`scan_${id}.json`, scan);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `UPDATE public.scans
+       SET business_name = COALESCE($2, business_name),
+           industry = COALESCE($3, industry),
+           city = COALESCE($4, city),
+           language = COALESCE($5, language),
+           status = COALESCE($6, status),
+           progress = COALESCE($7, progress),
+           error = COALESCE($8, error),
+           completed_at = COALESCE($9, completed_at)
+       WHERE id = $1`,
+      [
+        id,
+        scan.business_name ?? null,
+        scan.industry ?? null,
+        scan.city ?? null,
+        scan.language ?? null,
+        scan.status ?? null,
+        scan.progress ?? null,
+        scan.error ?? null,
+        scan.completed_at ?? null,
+      ]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL updateScanStatus error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -310,9 +393,7 @@ export async function updateScanStatus(
           completed_at: scan.completed_at,
         })
         .eq('id', id);
-    } catch {
-      // Non-blocking
-    }
+    } catch {}
   }
 
   return scan;
@@ -336,6 +417,21 @@ export async function saveScanQuestions(
 
   store.questions.set(scanId, dbQuestions);
 
+  // 1. Direct PostgreSQL
+  try {
+    for (const q of dbQuestions) {
+      await pgQuery(
+        `INSERT INTO public.questions (id, scan_id, question, language, order_index, created_at)
+         VALUES ($1, $2, $3, $4, $5, $6)
+         ON CONFLICT (id) DO NOTHING`,
+        [q.id, q.scan_id, q.question, q.language, q.order_index, q.created_at]
+      );
+    }
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL saveScanQuestions error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -348,9 +444,7 @@ export async function saveScanQuestions(
           order_index: q.order_index,
         }))
       );
-    } catch {
-      // Non-blocking
-    }
+    } catch {}
   }
 
   return dbQuestions;
@@ -369,6 +463,31 @@ export async function saveDBAIResponse(data: Omit<DBAIResponse, 'created_at'>): 
   list.push(record);
   store.aiResponses.set(data.scan_id, list);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `INSERT INTO public.ai_responses (id, scan_id, question_id, engine, model, raw_response, response_json, duration_ms, status, error, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+       ON CONFLICT (id) DO NOTHING`,
+      [
+        record.id,
+        record.scan_id,
+        record.question_id,
+        record.engine,
+        record.model,
+        record.raw_response,
+        record.response_json ? JSON.stringify(record.response_json) : null,
+        record.duration_ms,
+        record.status,
+        record.error ?? null,
+        record.created_at,
+      ]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL saveDBAIResponse error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -384,9 +503,7 @@ export async function saveDBAIResponse(data: Omit<DBAIResponse, 'created_at'>): 
         status: record.status,
         error: record.error,
       });
-    } catch {
-      // Non-blocking
-    }
+    } catch {}
   }
 
   return record;
@@ -405,6 +522,19 @@ export async function saveDBMention(data: Omit<DBMention, 'created_at'>): Promis
   list.push(record);
   store.mentions.set(data.ai_response_id, list);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `INSERT INTO public.mentions (id, ai_response_id, business_mentioned, position, confidence, evidence, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7)
+       ON CONFLICT (id) DO NOTHING`,
+      [record.id, record.ai_response_id, record.business_mentioned, record.position ?? null, record.confidence, record.evidence, record.created_at]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL saveDBMention error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -435,6 +565,19 @@ export async function saveDBCompetitor(data: Omit<DBCompetitor, 'created_at'>): 
   list.push(record);
   store.competitors.set(data.ai_response_id, list);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `INSERT INTO public.competitors (id, ai_response_id, name, url, position, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [record.id, record.ai_response_id, record.name, record.url ?? null, record.position ?? null, record.created_at]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL saveDBCompetitor error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -464,6 +607,19 @@ export async function saveDBSource(data: Omit<DBSource, 'created_at'>): Promise<
   list.push(record);
   store.sources.set(data.ai_response_id, list);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `INSERT INTO public.sources (id, ai_response_id, title, url, domain, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT (id) DO NOTHING`,
+      [record.id, record.ai_response_id, record.title ?? null, record.url, record.domain, record.created_at]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL saveDBSource error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -492,6 +648,33 @@ export async function saveDBReport(data: Omit<DBReport, 'created_at'>): Promise<
   store.reports.set(data.scan_id, record);
   writeCacheFile(`report_${data.scan_id}.json`, record);
 
+  // 1. Direct PostgreSQL
+  try {
+    await pgQuery(
+      `INSERT INTO public.reports (id, scan_id, overall_score, openai_score, gemini_score, google_score, report_json, created_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+       ON CONFLICT (scan_id) DO UPDATE SET
+         overall_score = EXCLUDED.overall_score,
+         openai_score = EXCLUDED.openai_score,
+         gemini_score = EXCLUDED.gemini_score,
+         google_score = EXCLUDED.google_score,
+         report_json = EXCLUDED.report_json`,
+      [
+        record.id,
+        record.scan_id,
+        record.overall_score,
+        record.openai_score,
+        record.gemini_score,
+        record.google_score,
+        JSON.stringify(record.report_json),
+        record.created_at,
+      ]
+    );
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL saveDBReport error:', err);
+  }
+
+  // 2. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -514,6 +697,7 @@ export async function saveDBReport(data: Omit<DBReport, 'created_at'>): Promise<
  * Retrieves scan with its current status.
  */
 export async function getScanRecord(scanId: string): Promise<DBScan | null> {
+  // 1. Memory / Cache
   let local = store.scans.get(scanId);
   if (!local) {
     local = readCacheFile<DBScan>(`scan_${scanId}.json`) || undefined;
@@ -521,6 +705,22 @@ export async function getScanRecord(scanId: string): Promise<DBScan | null> {
   }
   if (local) return local;
 
+  // 2. Direct PostgreSQL
+  try {
+    const res = await pgQuery<DBScan>(
+      'SELECT id, lead_id, url, business_name, industry, city, language, status, progress, error, started_at, completed_at, created_at FROM public.scans WHERE id = $1 LIMIT 1',
+      [scanId]
+    );
+    if (res && res.rows.length > 0) {
+      const found = res.rows[0];
+      store.scans.set(scanId, found);
+      return found;
+    }
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL getScanRecord error:', err);
+  }
+
+  // 3. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {
@@ -539,6 +739,7 @@ export async function getScanRecord(scanId: string): Promise<DBScan | null> {
  * Retrieves report by scan id.
  */
 export async function getReportByScanId(scanId: string): Promise<DBReport | null> {
+  // 1. Memory / Cache
   let local = store.reports.get(scanId);
   if (!local) {
     local = readCacheFile<DBReport>(`report_${scanId}.json`) || undefined;
@@ -546,6 +747,27 @@ export async function getReportByScanId(scanId: string): Promise<DBReport | null
   }
   if (local) return local;
 
+  // 2. Direct PostgreSQL
+  try {
+    const res = await pgQuery<DBReport>(
+      'SELECT id, scan_id, overall_score, openai_score, gemini_score, google_score, report_json, created_at FROM public.reports WHERE scan_id = $1 LIMIT 1',
+      [scanId]
+    );
+    if (res && res.rows.length > 0) {
+      const row = res.rows[0];
+      if (typeof row.report_json === 'string') {
+        try {
+          row.report_json = JSON.parse(row.report_json);
+        } catch {}
+      }
+      store.reports.set(scanId, row);
+      return row;
+    }
+  } catch (err) {
+    console.warn('[Repository] PostgreSQL getReportByScanId error:', err);
+  }
+
+  // 3. Supabase fallback
   const supabase = getSupabase();
   if (supabase) {
     try {

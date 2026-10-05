@@ -1,6 +1,6 @@
 export type SupportedLanguage = 'en' | 'et';
 
-export type AIModelType = 'openai' | 'gemini' | 'google_search';
+export type AIModelType = 'openai' | 'gemini' | 'google_ai_overview' | 'google_search';
 
 export interface BusinessProfile {
   url: string;
@@ -87,6 +87,11 @@ export interface VisibilityReport {
       responseCount: number;
     };
     gemini: {
+      mentionRate: number;
+      averagePosition: number | null;
+      responseCount: number;
+    };
+    googleAiOverview?: {
       mentionRate: number;
       averagePosition: number | null;
       responseCount: number;
