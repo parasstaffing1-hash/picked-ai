@@ -53,13 +53,16 @@ export async function POST(req: NextRequest) {
       language: chosenLanguage,
     });
 
+    const validUrl = urlValidation.normalizedUrl!;
+    const validEmail = emailValidation.normalizedEmail!;
+
     // 5. Start background scan job asynchronously via Next.js after() to keep serverless execution alive
     after(async () => {
       try {
         await executeBackgroundScan(
           scanId,
-          urlValidation.normalizedUrl,
-          emailValidation.normalizedEmail,
+          validUrl,
+          validEmail,
           chosenLanguage
         );
       } catch (err) {
