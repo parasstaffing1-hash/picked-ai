@@ -1,32 +1,23 @@
 import { Resend } from 'resend';
 import { VisibilityReport } from '@/types/scanner';
+import nodemailer from 'nodemailer';
 
 /**
- * Sends executive AI visibility audit report email via Resend.
+ * Sends executive AI visibility audit report email via Gmail SMTP or Resend.
  */
 export async function sendReportEmail(
   toEmail: string,
   report: VisibilityReport,
   appUrl: string
-): Promise<{ success: boolean; id?: string; error?: string }> {
-  const apiKey = process.env.RESEND_API_KEY;
+): Promise<{ success: boolean; id?: string; error?: string; provider?: string }> {
   const isEt = report.language === 'et';
   const reportUrl = `${appUrl}/report/${report.id}`;
 
-  if (!apiKey) {
-    console.log(`[Resend Email] No RESEND_API_KEY configured. Skipping email to ${toEmail}.`);
-    return { success: false, error: 'RESEND_API_KEY is not configured in environment.' };
-  }
+  const subject = isEt
+    ? `Teie AI nähtavuse raport: ${report.businessProfile.name} (Skoor: ${report.overallScore}/100)`
+    : `Your AI Visibility Report: ${report.businessProfile.name} (Score: ${report.overallScore}/100)`;
 
-  try {
-    const resend = new Resend(apiKey);
-    const fromAddress = process.env.EMAIL_FROM || process.env.RESEND_FROM_EMAIL || 'Picked AI Scanner <onboarding@resend.dev>';
-
-    const subject = isEt
-      ? `Teie AI nähtavuse raport: ${report.businessProfile.name} (Skoor: ${report.overallScore}/100)`
-      : `Your AI Visibility Report: ${report.businessProfile.name} (Score: ${report.overallScore}/100)`;
-
-    const html = `
+  const html = `
 <!DOCTYPE html>
 <html>
 <head>
@@ -65,11 +56,11 @@ export async function sendReportEmail(
 
     <div class="stats-grid">
       <div class="stat-box">
-        <div class="stat-num">${report.modelBreakdown.openai.mentionRate}%</div>
+        <div class="stat-num">${report.modelBreakdown?.openai?.mentionRate ?? 0}%</div>
         <div class="stat-label">ChatGPT (OpenAI)</div>
       </div>
       <div class="stat-box">
-        <div class="stat-num">${report.modelBreakdown.gemini.mentionRate}%</div>
+        <div class="stat-num">${report.modelBreakdown?.gemini?.mentionRate ?? 0}%</div>
         <div class="stat-label">Google Gemini</div>
       </div>
       <div class="stat-box">
@@ -102,22 +93,82 @@ export async function sendReportEmail(
 </html>
 `;
 
-    const res = await resend.emails.send({
-      from: fromAddress,
-      to: [toEmail],
-      subject,
-      html,
-    });
+  // 1. Try Gmail SMTP / Standard SMTP if configured (Works for ANY email without domain verification)
+  const smtpUser = process.env.SMTP_USER || process.env.GMAIL_USER;
+  const smtpPass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
 
-    return {
-      success: true,
-      id: res.data?.id,
-    };
-  } catch (err: any) {
-    console.error('[Resend Email] Failed to send email:', err);
-    return {
-      success: false,
-      error: err?.message || 'Failed to dispatch email',
-    };
+  if (smtpUser && smtpPass) {
+    try {
+      const transporter = nodemailer.createTransport({
+        service: 'gmail',
+        auth: {
+          user: smtpUser,
+          pass: smtpPass.replace(/\s+/g, ''), // Strip spaces if pasted with Google formatting
+        },
+      });
+
+      const info = await transporter.sendMail({
+        from: `"Picked AI Scanner" <${smtpUser}>`,
+        to: toEmail,
+        subject,
+        html,
+      });
+
+      console.log(`[SMTP Mailer] Successfully delivered audit email to ${toEmail} (ID: ${info.messageId})`);
+      return {
+        success: true,
+        id: info.messageId,
+        provider: 'smtp',
+      };
+    } catch (smtpErr: any) {
+      console.warn('[SMTP Mailer] SMTP send failed, falling back to Resend if available:', smtpErr.message);
+    }
   }
+
+  // 2. Try Resend
+  const resendApiKey = process.env.RESEND_API_KEY;
+  if (resendApiKey) {
+    try {
+      const resend = new Resend(resendApiKey);
+      const fromAddress =
+        process.env.EMAIL_FROM ||
+        process.env.RESEND_FROM_EMAIL ||
+        'Picked AI Scanner <onboarding@resend.dev>';
+
+      const res = await resend.emails.send({
+        from: fromAddress,
+        to: [toEmail],
+        subject,
+        html,
+      });
+
+      if (res.error) {
+        console.warn('[Resend Email] Resend API error:', res.error.message);
+        return {
+          success: false,
+          error: res.error.message,
+          provider: 'resend',
+        };
+      }
+
+      console.log(`[Resend Email] Successfully delivered audit email to ${toEmail} (ID: ${res.data?.id})`);
+      return {
+        success: true,
+        id: res.data?.id,
+        provider: 'resend',
+      };
+    } catch (err: any) {
+      console.warn('[Resend Email] Failed to send email:', err.message);
+      return {
+        success: false,
+        error: err.message,
+        provider: 'resend',
+      };
+    }
+  }
+
+  return {
+    success: false,
+    error: 'No email service (SMTP or Resend) configured.',
+  };
 }
