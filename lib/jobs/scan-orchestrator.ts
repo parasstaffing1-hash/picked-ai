@@ -8,7 +8,7 @@ import {
   executeGoogleSearchCheck,
   EngineObservation,
 } from '../ai/engines';
-import { analyzeAIResponseWithAI, StructuredAnalysisResult } from '../analysis/response-analyzer';
+import { analyzeResponseFast, StructuredAnalysisResult } from '../analysis/response-analyzer';
 import { calculateVisibilityScores, QuestionObservationRecord } from '../scoring/calculator';
 import {
   updateScanStatus,
@@ -137,8 +137,10 @@ export async function executeBackgroundScan(
     const totalObservationsCount = questions.length * 3;
     let completedCount = 0;
 
-    // Execute in controlled batches of 3 questions (9 concurrent checks per batch) to respect rate limits
-    const batchSize = 3;
+    // Execute checks concurrently and accumulate database writes
+    const dbPromises: Promise<any>[] = [];
+    const batchSize = 5;
+
     for (let i = 0; i < questions.length; i += batchSize) {
       const batchQuestions = questions.slice(i, i + batchSize);
 
@@ -146,7 +148,7 @@ export async function executeBackgroundScan(
         batchQuestions.map(async (q) => {
           const qDbId = `q_${scanId}_${q.order_index}`;
 
-          // Run OpenAI, Gemini, and Google AI Overviews concurrently for this question
+          // Run OpenAI, Gemini, and Google AI Overviews concurrently
           const [openaiObs, geminiObs, googleObs] = await Promise.all([
             executeOpenAICheck(q.question, business.business_name),
             executeGeminiCheck(q.question, business.business_name),
@@ -169,63 +171,65 @@ export async function executeBackgroundScan(
               },
             });
 
-            // Save AI Response to database
             const aiResponseId = `resp_${scanId}_${q.order_index}_${obs.engine}_${Date.now()}`;
-            await saveDBAIResponse({
-              id: aiResponseId,
-              scan_id: scanId,
-              question_id: qDbId,
-              engine: obs.engine,
-              model: obs.model,
-              raw_response: obs.rawResponse,
-              response_json: { citations: obs.citations },
-              duration_ms: obs.durationMs,
-              status: obs.status,
-              error: obs.error,
-            });
+            dbPromises.push(
+              saveDBAIResponse({
+                id: aiResponseId,
+                scan_id: scanId,
+                question_id: qDbId,
+                engine: obs.engine,
+                model: obs.model,
+                raw_response: obs.rawResponse,
+                response_json: { citations: obs.citations },
+                duration_ms: obs.durationMs,
+                status: obs.status,
+                error: obs.error,
+              })
+            );
 
-            // Analyze response for mentions, competitors, citations, position
-            const analysis = await analyzeAIResponseWithAI(
+            // Fast deterministic analysis for brand mentions, ranking positions, competitors, sources
+            const analysis = analyzeResponseFast(
               business.business_name,
               business.domain,
-              q.question,
               obs.rawResponse,
               obs.citations
             );
 
-            // Save mention
-            await saveDBMention({
-              id: `mention_${aiResponseId}`,
-              ai_response_id: aiResponseId,
-              business_mentioned: analysis.businessMentioned,
-              position: analysis.position,
-              confidence: analysis.confidence,
-              evidence: analysis.evidence,
-            });
+            dbPromises.push(
+              saveDBMention({
+                id: `mention_${aiResponseId}`,
+                ai_response_id: aiResponseId,
+                business_mentioned: analysis.businessMentioned,
+                position: analysis.position,
+                confidence: analysis.confidence,
+                evidence: analysis.evidence,
+              })
+            );
 
-            // Save competitors
             for (const comp of analysis.competitors) {
-              await saveDBCompetitor({
-                id: `comp_${aiResponseId}_${Math.random().toString(36).substring(2, 6)}`,
-                ai_response_id: aiResponseId,
-                name: comp.name,
-                url: comp.url,
-                position: comp.position,
-              });
+              dbPromises.push(
+                saveDBCompetitor({
+                  id: `comp_${aiResponseId}_${Math.random().toString(36).substring(2, 6)}`,
+                  ai_response_id: aiResponseId,
+                  name: comp.name,
+                  url: comp.url,
+                  position: comp.position,
+                })
+              );
             }
 
-            // Save sources
             for (const src of analysis.sources) {
-              await saveDBSource({
-                id: `src_${aiResponseId}_${Math.random().toString(36).substring(2, 6)}`,
-                ai_response_id: aiResponseId,
-                title: src.title,
-                url: src.url,
-                domain: src.domain || 'web',
-              });
+              dbPromises.push(
+                saveDBSource({
+                  id: `src_${aiResponseId}_${Math.random().toString(36).substring(2, 6)}`,
+                  ai_response_id: aiResponseId,
+                  title: src.title,
+                  url: src.url,
+                  domain: src.domain || 'web',
+                })
+              );
             }
 
-            // Check if direct website URL was cited
             const directUrlCited = obs.citations.some(
               (c) => c.domain.toLowerCase().includes(business.domain.toLowerCase()) || c.url.includes(business.domain)
             );
@@ -246,10 +250,12 @@ export async function executeBackgroundScan(
         })
       );
 
-      // Update progress proportionally (between 55% and 88%)
       const progressSoFar = Math.min(88, 55 + Math.round((completedCount / totalObservationsCount) * 33));
       await updateScanStatus(scanId, { progress: progressSoFar });
     }
+
+    // Persist all DB writes in parallel without blocking sequential iteration
+    await Promise.allSettled(dbPromises);
 
     // --------------------------------------------------------------------------
     // 5. BUILDING REPORT & SCORING
