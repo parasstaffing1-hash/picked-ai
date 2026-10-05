@@ -1,8 +1,10 @@
-import { NextRequest, NextResponse } from 'next/server';
+import { NextRequest, NextResponse, after } from 'next/server';
 import { validateAndNormalizeUrl, validateEmail, checkRateLimit } from '@/lib/security/validation';
 import { findOrCreateLead, createScanRecord } from '@/lib/database/repository';
 import { executeBackgroundScan } from '@/lib/jobs/scan-orchestrator';
 import { SupportedLanguage } from '@/types/scanner';
+
+export const maxDuration = 60;
 
 export async function POST(req: NextRequest) {
   try {
@@ -51,14 +53,18 @@ export async function POST(req: NextRequest) {
       language: chosenLanguage,
     });
 
-    // 5. Start background scan job asynchronously (Do NOT block HTTP response)
-    executeBackgroundScan(
-      scanId,
-      urlValidation.normalizedUrl,
-      emailValidation.normalizedEmail,
-      chosenLanguage
-    ).catch((err) => {
-      console.error(`[Background Job Error] Scan ${scanId}:`, err);
+    // 5. Start background scan job asynchronously via Next.js after() to keep serverless execution alive
+    after(async () => {
+      try {
+        await executeBackgroundScan(
+          scanId,
+          urlValidation.normalizedUrl,
+          emailValidation.normalizedEmail,
+          chosenLanguage
+        );
+      } catch (err) {
+        console.error(`[Background Job Error] Scan ${scanId}:`, err);
+      }
     });
 
     // 6. Return immediate response
