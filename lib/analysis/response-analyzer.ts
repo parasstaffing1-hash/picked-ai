@@ -204,13 +204,20 @@ Return strictly valid JSON matching this schema:
 }
 No markdown fences or code blocks.`;
 
-    const res = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Analysis timed out.')), 2500)
+    );
+
+    const res = await Promise.race([
+      ai.models.generateContent({
+        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        },
+      }),
+      timeoutPromise,
+    ]);
 
     const text = res.text?.trim() || '';
     if (text) {

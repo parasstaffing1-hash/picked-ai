@@ -102,13 +102,20 @@ Format strictly as JSON array of 10 objects:
 ]
 No backticks, no markdown, raw JSON only.`;
 
-    const res = await ai.models.generateContent({
-      model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
-      contents: prompt,
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
+    const timeoutPromise = new Promise<never>((_, reject) =>
+      setTimeout(() => reject(new Error('Question generation timed out.')), 4000)
+    );
+
+    const res = await Promise.race([
+      ai.models.generateContent({
+        model: process.env.GEMINI_MODEL || 'gemini-3.8-flash',
+        contents: prompt,
+        config: {
+          responseMimeType: 'application/json',
+        },
+      }),
+      timeoutPromise,
+    ]);
 
     const text = res.text?.trim() || '';
     if (text) {

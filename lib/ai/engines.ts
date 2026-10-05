@@ -20,9 +20,9 @@ export interface EngineObservation {
  */
 async function withRetry<T>(
   fn: () => Promise<T>,
-  retries = 2,
-  baseDelayMs = 800,
-  timeoutMs = 12000
+  retries = 1,
+  baseDelayMs = 400,
+  timeoutMs = 4000
 ): Promise<T> {
   let attempt = 0;
   while (true) {
